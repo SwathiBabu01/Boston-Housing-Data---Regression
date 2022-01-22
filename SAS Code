@@ -1,0 +1,374 @@
+*FINAL PROJECT BOSTON DATASET;
+*Goal is to build a model that predicts the median value of homes with the given data;
+
+*Importing boston dataset;
+TITLE "Importing BOSTON dataset";
+DATA boston;
+INFILE "boston.txt" firstobs = 2 delimiter = " " missover;
+INPUT crime zn indus chas nox rm age dis rad tax ptratio minor lstat medv;
+*Label the variable names if you want to (later);
+RUN;
+
+*Checking the data;
+PROC PRINT DATA = boston(obs = 10) ;
+RUN;
+
+*Descriptives;
+TITLE "Descriptives";
+PROC MEANS mean min max std stderr p25 p50 p75 clm mode;
+VAR crime zn indus chas nox rm age dis rad tax ptratio minor lstat medv;
+RUN;
+
+*Histograms;
+TITLE "Histograms";
+PROC UNIVARIATE normal;
+VAR crime zn indus chas nox rm age dis rad tax ptratio minor lstat medv;
+histogram /normal;
+RUN;
+
+*Boxplots;
+TITLE "Boxplots";
+PROC UNIVARIATE plots;
+VAR crime zn indus chas nox rm age dis rad tax ptratio minor lstat medv;
+RUN;
+
+*Scatterplots- Check for linearity;
+TITLE "Scatterplots";
+PROC GPLOT;
+PLOT medv * (crime zn indus chas nox rm age dis rad tax ptratio minor lstat);
+RUN;
+
+*Correlation values;
+TITLE "Correlations";
+PROC CORR;
+RUN;
+
+*Fitting full model and checking assumptions and model diagnostics;
+TITLE "Full model - Model assumptions and diagnostics";
+PROC REG;
+MODEL medv = crime zn indus chas nox rm age dis rad tax ptratio minor lstat/ stb r influence VIF;
+*Residual plots;
+plot student.*(crime zn indus chas nox rm age dis rad tax ptratio minor lstat predicted.);
+plot npp.*student.;
+RUN;
+
+*Removing Outliers;
+TITLE "Removing Outliers & Influential points";
+DATA boston_new;
+SET boston;
+if _n_ in (215,357,365,366,369,372,373,375) then delete;
+RUN;
+
+*Fitting full model and checking assumptions and model diagnostics;
+TITLE "Checking Model assumptions and diagnostics after removing outliers";
+PROC REG data = boston_new;
+MODEL medv = crime zn indus chas nox rm age dis rad tax ptratio minor lstat/ stb r influence VIF;
+*Residual plots;
+plot student.*(crime zn indus chas nox rm age dis rad tax ptratio minor lstat predicted.);
+plot npp.*student.;
+RUN;
+
+*-------------------------------------------------------------------------------------------;
+
+* LOG TRANSFORMATION;
+TITLE "Log transformation";
+DATA boston_log;
+SET boston_new;
+logmedv = log(medv);
+RUN;
+
+*Fitting full model and checking assumptions and model diagnostics after transformation;
+TITLE "Checking Model assumptions and diagnostics after transformation";
+PROC REG data = boston_log;
+MODEL logmedv = crime zn indus chas nox rm age dis rad tax ptratio minor lstat/stb r influence VIF;
+*Residual plots;
+plot student.*(crime zn indus chas nox rm age dis rad tax ptratio minor lstat predicted.);
+plot npp.*student.;
+RUN;
+
+*Splitting into training and testing datasets;
+TITLE "Splitting training and testing dataset";
+PROC SURVEYSELECT data = boston_log out = boston_all_log seed = 317380 samprate = 0.80 outall;
+RUN;
+
+*Creating a new variable for training set;
+TITLE "new_medv variable for training set";
+DATA boston_all_log;
+SET boston_all_log;
+if selected then new_medv = logmedv;
+RUN;
+*Checking the data;
+PROC PRINT DATA = boston_all_log;
+RUN;
+
+*Model selection;
+*Stepwise;
+TITLE "Model Selection - Stepwise";
+PROC REG DATA = boston_all_log;
+MODEL new_medv = crime zn indus chas nox rm age dis rad tax ptratio minor lstat / selection = stepwise;
+RUN;
+*Backward selection;
+TITLE "Model Selection - Backward";
+PROC REG DATA = boston_all_log;
+MODEL new_medv = crime zn indus chas nox rm age dis rad tax ptratio minor lstat / selection = backward;
+RUN;
+
+*Testing the model;
+TITLE "Model 1";
+PROC REG DATA = boston_all_log;
+MODEL new_medv = crime zn chas nox rm age dis rad tax ptratio minor lstat/ stb VIF influence r;
+plot student.*(crime zn chas nox rm age dis rad tax ptratio minor lstat predicted.);
+plot npp.*student.;
+RUN;
+
+*Removing outliers and influential points;
+TITLE "Removing outliers and Influential points";
+DATA boston_all_log;
+SET boston_all_log;
+if _n_ in (8,185) then delete;
+RUN;
+
+TITLE "Model 1 after removing outliers";
+PROC REG DATA = boston_all_log;
+MODEL new_medv = crime zn chas nox rm age dis rad tax ptratio minor lstat/ stb VIF influence r;
+plot student.*(crime zn chas nox rm age dis rad tax ptratio minor lstat predicted.);
+plot npp.*student.;
+RUN;
+
+
+*Test performance of the model;
+TITLE "Validation- Test Performance of Model 1";
+PROC REG DATA = boston_all_log;
+MODEL new_medv = crime zn chas nox rm age dis rad tax ptratio minor lstat;
+OUTPUT out = outm1_log (where=(new_medv=.)) p = yhat;
+RUN;
+*Checking the created y variable;
+PROC PRINT data = outm1;
+RUN; 
+
+
+*Test performance parameters for the test sets;
+TITLE "Performance test parameters - Model 1";
+DATA outm1_log_sum;
+SET outm1_log;
+d = medv - yhat;
+absd = abs(d);
+RUN;
+*RMSE and MAE;
+PROC SUMMARY DATA = outm1_log_sum;
+VAR d absd;
+OUTPUT OUT = outm1_log_stats std(d) = rmse mean(absd) = mae;
+RUN;
+*Printing it;
+PROC PRINT DATA = outm1_log_stats;
+RUN;
+*Correlation;
+PROC CORR DATA = outm1_log;
+VAR medv yhat;
+RUN;
+
+*--------------------------------------------------------------------------------------------------;
+*QUADRATIC POLYNOMIAL REGRESSION;
+TITLE "Quadratic Polynomial Regression";
+PROC GLMSELECT data = boston_new;
+MODEL medv = crime|zn|indus|chas|nox|rm|age|dis|rad|tax|ptratio|minor|lstat @2 / selection = none;
+RUN;
+
+*Splitting into training and testing datasets;
+TITLE "Splitting training and testing dataset";
+PROC SURVEYSELECT data = boston_new out = boston_all_pol seed = 456729 samprate = 0.75 outall;
+RUN;
+
+*Creating a new variable for training set;
+TITLE "new_medv variable for training set";
+DATA boston_all_pol;
+SET boston_all_pol;
+if selected then new_medv = medv;
+RUN;
+*Checking the data;
+PROC PRINT DATA = boston_all_pol;
+RUN;
+
+*Model selection;
+TITLE "Model Selection - Stepwise";
+PROC GLMSELECT data = boston_all_pol;
+MODEL new_medv = crime|zn|indus|chas|nox|rm|age|dis|rad|tax|ptratio|minor|lstat @2 / selection = stepwise ( stop = cv);
+RUN;
+
+TITLE "Model Selection - Forward";
+PROC GLMSELECT data = boston_all_pol;
+MODEL new_medv = crime|zn|indus|chas|nox|rm|age|dis|rad|tax|ptratio|minor|lstat @2 / selection = forward ( stop = cv);
+RUN;
+
+DATA boston_stepwise;
+SET boston_all_pol;
+dis_tax = dis*tax;
+rm_ptratio = rm*ptratio;
+rm_lstat = rm*lstat;
+RUN;
+
+TITLE "Model 1- Checking Model assumptions and diagnostics";
+PROC REG data = boston_stepwise;
+MODEL new_medv = rm dis_tax rm_ptratio lstat rm_lstat/ stb r influence VIF;
+*Residual plots;
+plot student.*(rm dis_tax rm_ptratio lstat rm_lstat predicted.);
+plot npp.*student.;
+RUN;
+
+*Removing outliers and influential points;
+TITLE "Removing outliers and Influential points";
+DATA boston_stepwise;
+SET boston_stepwise;
+if _n_ in (8,89,182,365) then delete;
+RUN;
+
+*Outliers;
+TITLE "Model 1 after removing outliers";
+PROC REG DATA = boston_stepwise;
+MODEL new_medv = rm dis_tax rm_ptratio lstat rm_lstat/ stb r influence VIF;
+plot student.*(rm dis_tax rm_ptratio lstat rm_lstat predicted.);
+plot npp.*student.;
+RUN;
+
+DATA boston_forward;
+SET boston_all_pol;
+age_dis = age*dis;
+dis_tax = dis*tax;
+rm_ptratio = rm*ptratio;
+nox_lstat = nox*lstat;
+rm_lstat = rm*lstat;
+RUN;
+
+TITLE "Model 2- Checking Model assumptions and diagnostics";
+PROC REG data = boston_forward;
+MODEL new_medv = rm age_dis dis_tax rm_ptratio lstat nox_lstat rm_lstat/ stb r influence VIF;
+*Residual plots;
+plot student.*(rm age_dis dis_tax rm_ptratio lstat nox_lstat rm_lstat predicted.);
+plot npp.*student.;
+RUN;
+
+*Removing outliers and influential points;
+TITLE "Removing outliers and Influential points";
+DATA boston_forward;
+SET boston_forward;
+if _n_ in (8,182,365) then delete;
+RUN;
+
+*Outliers;
+TITLE "Model 2 after removing outliers";
+PROC REG DATA = boston_forward;
+MODEL new_medv = rm age_dis dis_tax rm_ptratio lstat nox_lstat rm_lstat/ stb r influence VIF;
+plot student.*(rm age_dis dis_tax rm_ptratio lstat nox_lstat rm_lstat predicted.);
+plot npp.*student.;
+RUN;
+
+*Testing the models;
+TITLE "Model 1";
+PROC REG DATA = boston_stepwise;
+MODEL new_medv = rm dis_tax rm_ptratio lstat rm_lstat/stb VIF r influence;
+plot student.*(rm dis_tax rm_ptratio lstat rm_lstat predicted.);
+plot npp.*student.;
+RUN;
+
+TITLE "Model 2";
+PROC REG DATA =boston_forward;
+MODEL new_medv = rm age_dis dis_tax rm_ptratio lstat nox_lstat rm_lstat/ stb VIF r influence;
+plot student.*(rm age_dis dis_tax rm_ptratio lstat nox_lstat rm_lstat predicted.);
+plot npp.*student.;
+RUN;
+
+*Test performance of the models;
+TITLE "Validation- Test Performance of Model 1";
+PROC REG DATA = boston_stepwise;
+MODEL new_medv = rm dis_tax rm_ptratio lstat rm_lstat;
+OUTPUT out = outm1_pol (where=(new_medv=.)) p = yhat;
+RUN;
+*Checking the created y variable;
+PROC PRINT data = outm1_pol;
+RUN; 
+
+TITLE "Validation- Test Performance of Model 2";
+PROC REG DATA = boston_forward;
+MODEL new_medv = rm age_dis dis_tax rm_ptratio lstat nox_lstat rm_lstat;
+OUTPUT out = outm2_pol (where=(new_medv=.)) p = yhat;
+RUN;
+*Checking the created y variable;
+PROC PRINT DATA = outm2_pol;
+RUN;
+
+*Test performance parameters for the test sets;
+TITLE "Performance test parameters - Model 1";
+DATA outm1_pol_sum;
+SET outm1_pol;
+d = medv - yhat;
+absd = abs(d);
+RUN;
+*RMSE and MAE;
+PROC SUMMARY DATA = outm1_pol_sum;
+VAR d absd;
+OUTPUT OUT = outm1_pol_stats std(d) = rmse mean(absd) = mae;
+RUN;
+*Printing it;
+PROC PRINT DATA = outm1_pol_stats;
+RUN;
+*Correlation;
+PROC CORR DATA = outm1_pol;
+VAR medv yhat;
+RUN;
+
+
+TITLE "Performance test parameters - Model 2";
+DATA outm2_pol_sum;
+SET outm2_pol;
+d = medv - yhat;
+absd = abs(d);
+RUN;
+*RMSE and MAE;
+PROC SUMMARY DATA = outm2_pol_sum;
+VAR d absd;
+OUTPUT OUT = outm2_pol_stats std(d) = rmse mean(absd) = mae;
+RUN;
+*Printing it;
+PROC PRINT DATA = outm2_pol_stats;
+RUN;
+*Correlation;
+PROC CORR DATA = outm2_pol;
+VAR medv yhat;
+RUN;
+
+*------------------------------------------------------------------------------------------------;
+*Final Model;
+TITLE "Final Model - The log transformation";
+PROC REG DATA = boston_log;
+MODEL logmedv = crime zn chas nox rm age dis rad tax ptratio minor lstat/ stb VIF influence r;
+plot student.*(crime zn chas nox rm age dis rad tax ptratio minor lstat predicted.);
+plot npp.*student.;
+RUN;
+
+TITLE "Final Model - Removing chas";
+PROC REG DATA = boston_log;
+MODEL logmedv = crime zn nox rm age dis rad tax ptratio minor lstat/ stb VIF influence r;
+plot student.*(crime zn nox rm age dis rad tax ptratio minor lstat predicted.);
+plot npp.*student.;
+RUN;
+
+*Predictions;
+TITLE "Predictions";
+DATA pred;
+input crime zn indus chas nox rm age dis rad tax ptratio minor lstat;
+datalines;
+0.5 15 . . 0.5 3 50 4 4 400 15 300 25
+18.5 25 . . 0.4 4 70 5 10 350 20 250 25
+;
+*joining the datasets;
+DATA predict;
+SET pred boston_log;
+*predictions;
+PROC REG DATA = predict;
+MODEL logmedv = crime zn nox rm age dis rad tax ptratio minor lstat/p clm cli alpha=0.05;
+RUN;
+
+
+
+
+
